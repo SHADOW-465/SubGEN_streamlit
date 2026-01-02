@@ -6,3 +6,4 @@ moviepy
 plotly
 torch
 torchaudio --index-url https://download.pytorch.org/whl/cpu
+streamlit-webrtc
