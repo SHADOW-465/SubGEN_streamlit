@@ -2,8 +2,14 @@ streamlit
 faster-whisper
 ffmpeg-python
 moviepy
-
 plotly
-torch
+altair
+numpy
+pandas
+torch --index-url https://download.pytorch.org/whl/cpu
 torchaudio --index-url https://download.pytorch.org/whl/cpu
+transformers
+peft
+pyserial
+pysrt
 streamlit-webrtc
