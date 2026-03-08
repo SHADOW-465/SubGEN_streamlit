@@ -35,7 +35,10 @@ except ImportError:
     SERIAL_AVAILABLE = False
 
 try:
-    from moviepy.editor import VideoFileClip
+    try:
+        from moviepy import VideoFileClip
+    except ImportError:
+        from moviepy.editor import VideoFileClip
     MOVIEPY_AVAILABLE = True
 except ImportError:
     MOVIEPY_AVAILABLE = False
