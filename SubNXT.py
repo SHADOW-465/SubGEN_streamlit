@@ -1013,8 +1013,8 @@ with tab_file:
                     if i < len(st.session_state.subtitles):
                         new_text = row["Text"]
                         original = st.session_state.original_texts.get(i, "")
-                        # Update subtitle
-                        st.session_state.subtitles[i]["text"] = new_text
+                        # Write to the correct field based on what was displayed
+                        st.session_state.subtitles[i][display_text_key] = new_text
                         st.session_state.subtitles[i]["start"] = row["Start (s)"]
                         st.session_state.subtitles[i]["end"] = row["End (s)"]
                         # Save correction if text changed
@@ -1099,9 +1099,15 @@ with tab_file:
                     st.rerun()
 
                 export_subs = st.session_state.subtitles
-                vtt_out = create_vtt(export_subs, pos)
-                srt_out = create_srt(export_subs)
-                json_out = json.dumps(export_subs, indent=2, ensure_ascii=False)
+                display_text_key = "translated" if TARGET_LANGUAGES.get(target_lang_name) and TARGET_LANGUAGES[target_lang_name] != SOURCE_LANGUAGES.get(source_lang_name) else "text"
+                # Build export list using whichever text field was active
+                export_subs_for_download = [
+                    {**s, "text": s.get(display_text_key, s["text"])}
+                    for s in export_subs
+                ]
+                vtt_out = create_vtt(export_subs_for_download, pos)
+                srt_out = create_srt(export_subs_for_download)
+                json_out = json.dumps(export_subs_for_download, indent=2, ensure_ascii=False)
 
                 ec1, ec2, ec3 = st.columns(3)
                 with ec1:

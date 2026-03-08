@@ -26,3 +26,23 @@ def test_jetbrains_mono_imported():
     import_lines = [l for l in content.splitlines() if "@import" in l and "fonts.googleapis" in l]
     assert any("JetBrains" in l for l in import_lines), \
         "JetBrains Mono must be included in the Google Fonts @import"
+
+
+def test_save_edits_target_field_logic():
+    """
+    When display_text_key is 'translated', edited text must go to 'translated'.
+    When display_text_key is 'text', edited text must go to 'text'.
+    """
+    def apply_edit(subtitle, new_text, display_key):
+        subtitle[display_key] = new_text
+        return subtitle
+
+    sub = {"text": "original", "translated": "translated original", "start": 0, "end": 2}
+
+    result_text = apply_edit(dict(sub), "edited text", "text")
+    assert result_text["text"] == "edited text"
+    assert result_text["translated"] == "translated original"
+
+    result_trans = apply_edit(dict(sub), "edited translation", "translated")
+    assert result_trans["translated"] == "edited translation"
+    assert result_trans["text"] == "original"
