@@ -1344,15 +1344,16 @@ with tab_settings:
         dep_html = '<div class="glass-card"><table style="width:100%;">'
         for name, available in deps:
             color = "var(--green-qc)" if available else "var(--red-qc)"
-            icon = "✓" if available else "✗"
-            dep_html += f"""
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-                <td style="padding:8px; color:var(--text-main);">{name}</td>
-                <td style="padding:8px; text-align:right; color:{color}; font-weight:600;">{icon} {'Installed' if available else 'Missing'}</td>
-            </tr>
-            """
+            icon = "&#10003;" if available else "&#10007;"
+            status = "Installed" if available else "Missing"
+            dep_html += (
+                f'<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">'
+                f'<td style="padding:8px; color:var(--text-main);">{name}</td>'
+                f'<td style="padding:8px; text-align:right; color:{color}; font-weight:600;">{icon} {status}</td>'
+                f'</tr>'
+            )
         dep_html += "</table></div>"
-        st.markdown(dep_html, unsafe_allow_html=True)
+        st.html(dep_html)
 
         # Hardware info
         st.markdown("---")
