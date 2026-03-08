@@ -494,7 +494,7 @@ def qc_badge(conf_value):
 # ║  SELF-LEARNING LOOP                                                         ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
-CORRECTIONS_FILE = "corrections.json"
+CORRECTIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corrections.json")
 
 def load_corrections():
     """Load stored corrections from JSON file"""
