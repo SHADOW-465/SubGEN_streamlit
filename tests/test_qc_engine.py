@@ -4,7 +4,7 @@ import numpy as np
 from subgen_ai.core.qc_engine import (
     compute_asr_conf, compute_snr_penalty, compute_fused_conf,
     label_segment, cosine_similarity, euclidean_similarity,
-    compute_match_score, FUSED_CONF_THRESHOLD,
+    compute_match_score, validate_correction, FUSED_CONF_THRESHOLD,
     THRESHOLD_HIGH, THRESHOLD_MEDIUM
 )
 
@@ -77,3 +77,44 @@ def test_compute_match_score_identical():
 def test_threshold_constants():
     assert THRESHOLD_HIGH > THRESHOLD_MEDIUM
     assert THRESHOLD_MEDIUM > 0
+
+
+def test_euclidean_similarity_identical():
+    """Identical vectors → 1.0"""
+    v = [1.0] * 12
+    assert euclidean_similarity(v, v) == 1.0
+
+
+def test_euclidean_similarity_distant():
+    """Very distant vectors → decays towards 0, stays positive"""
+    v1 = [0.0] * 12
+    v2 = [100.0] * 12
+    result = euclidean_similarity(v1, v2)
+    assert 0.0 < result < 0.1   # should be small but positive
+
+
+def test_validate_correction_high():
+    """Identical fingerprints → HIGH tier, accepted=True"""
+    fp = {"ok": True, "hw": False, "mfcc_mean": [1.0]*12, "mfcc_var": [0.1]*12}
+    result = validate_correction(fp, fp)
+    assert result.accepted is True
+    assert result.tier == "HIGH"
+    assert result.score >= THRESHOLD_HIGH
+
+
+def test_validate_correction_mismatch():
+    """Very different fingerprints → MISMATCH tier, accepted=False"""
+    fp1 = {"ok": True, "hw": False, "mfcc_mean": [10.0]*12, "mfcc_var": [0.1]*12}
+    fp2 = {"ok": True, "hw": False, "mfcc_mean": [-10.0]*12, "mfcc_var": [0.1]*12}
+    result = validate_correction(fp1, fp2)
+    assert result.accepted is False
+    assert result.tier == "MISMATCH"
+
+
+def test_validate_correction_missing_fingerprint():
+    """If fingerprint ok=False, correction is accepted without validation"""
+    bad_fp = {"ok": False}
+    good_fp = {"ok": True, "mfcc_mean": [1.0]*12, "mfcc_var": [0.1]*12}
+    result = validate_correction(bad_fp, good_fp)
+    assert result.accepted is True
+    assert result.tier == "UNKNOWN"
