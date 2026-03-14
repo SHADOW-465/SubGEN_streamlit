@@ -9,7 +9,6 @@ Implements:
 """
 import json
 import struct
-import time
 from typing import Optional
 
 import numpy as np
