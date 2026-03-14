@@ -32,3 +32,20 @@ def test_validation_result_fields():
                           hw_used=False, message="OK")
     assert vr.accepted is True
     assert vr.tier == "HIGH"
+
+
+def test_transcriber_imports():
+    """Transcriber module must import without errors (lazy model loading)."""
+    from subgen_ai.core import transcriber
+    assert hasattr(transcriber, "transcribe")
+    assert hasattr(transcriber, "extract_clip")
+    assert hasattr(transcriber, "load_model")
+
+
+def test_extract_clip_bounds():
+    """extract_clip must clamp to array boundaries."""
+    import numpy as np
+    from subgen_ai.core.transcriber import extract_clip
+    audio = np.ones(16000, dtype=np.float32)
+    clip = extract_clip(audio, 16000, start_s=-1.0, end_s=100.0)
+    assert len(clip) == len(audio)   # clamped to full array
