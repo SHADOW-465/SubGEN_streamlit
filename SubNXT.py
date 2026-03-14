@@ -35,7 +35,10 @@ except ImportError:
     SERIAL_AVAILABLE = False
 
 try:
-    from moviepy.editor import VideoFileClip
+    try:
+        from moviepy import VideoFileClip
+    except ImportError:
+        from moviepy.editor import VideoFileClip
     MOVIEPY_AVAILABLE = True
 except ImportError:
     MOVIEPY_AVAILABLE = False
@@ -125,7 +128,7 @@ INDIC_CODES = {"ta", "ml", "hi", "te", "mr", "bn", "ur"}
 # ── Premium CSS ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
     :root {
         --primary: #00f2ea;
@@ -494,7 +497,7 @@ def qc_badge(conf_value):
 # ║  SELF-LEARNING LOOP                                                         ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
-CORRECTIONS_FILE = "corrections.json"
+CORRECTIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corrections.json")
 
 def load_corrections():
     """Load stored corrections from JSON file"""
@@ -1013,8 +1016,8 @@ with tab_file:
                     if i < len(st.session_state.subtitles):
                         new_text = row["Text"]
                         original = st.session_state.original_texts.get(i, "")
-                        # Update subtitle
-                        st.session_state.subtitles[i]["text"] = new_text
+                        # Write to the correct field based on what was displayed
+                        st.session_state.subtitles[i][display_text_key] = new_text
                         st.session_state.subtitles[i]["start"] = row["Start (s)"]
                         st.session_state.subtitles[i]["end"] = row["End (s)"]
                         # Save correction if text changed
@@ -1099,9 +1102,15 @@ with tab_file:
                     st.rerun()
 
                 export_subs = st.session_state.subtitles
-                vtt_out = create_vtt(export_subs, pos)
-                srt_out = create_srt(export_subs)
-                json_out = json.dumps(export_subs, indent=2, ensure_ascii=False)
+                display_text_key = "translated" if TARGET_LANGUAGES.get(target_lang_name) and TARGET_LANGUAGES[target_lang_name] != SOURCE_LANGUAGES.get(source_lang_name) else "text"
+                # Build export list using whichever text field was active
+                export_subs_for_download = [
+                    {**s, "text": s.get(display_text_key, s["text"])}
+                    for s in export_subs
+                ]
+                vtt_out = create_vtt(export_subs_for_download, pos)
+                srt_out = create_srt(export_subs_for_download)
+                json_out = json.dumps(export_subs_for_download, indent=2, ensure_ascii=False)
 
                 ec1, ec2, ec3 = st.columns(3)
                 with ec1:
@@ -1335,15 +1344,16 @@ with tab_settings:
         dep_html = '<div class="glass-card"><table style="width:100%;">'
         for name, available in deps:
             color = "var(--green-qc)" if available else "var(--red-qc)"
-            icon = "✓" if available else "✗"
-            dep_html += f"""
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-                <td style="padding:8px; color:var(--text-main);">{name}</td>
-                <td style="padding:8px; text-align:right; color:{color}; font-weight:600;">{icon} {'Installed' if available else 'Missing'}</td>
-            </tr>
-            """
+            icon = "&#10003;" if available else "&#10007;"
+            status = "Installed" if available else "Missing"
+            dep_html += (
+                f'<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">'
+                f'<td style="padding:8px; color:var(--text-main);">{name}</td>'
+                f'<td style="padding:8px; text-align:right; color:{color}; font-weight:600;">{icon} {status}</td>'
+                f'</tr>'
+            )
         dep_html += "</table></div>"
-        st.markdown(dep_html, unsafe_allow_html=True)
+        st.html(dep_html)
 
         # Hardware info
         st.markdown("---")
