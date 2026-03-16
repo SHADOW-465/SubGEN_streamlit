@@ -371,6 +371,13 @@ def render_tab_review() -> None:
     red_segs   = [s for s in segments if s.label == "RED"]
     green_segs = [s for s in segments if s.label == "GREEN"]
 
+    # ── Video player (top of tab, before header) ─────────────────────────────
+    vb = st.session_state.get("video_bytes")
+    if vb:
+        from subgen_ai.components.video_player import render_video_player
+        render_video_player(vb, _get_video_mime(), to_vtt(segments))
+        st.markdown("---")
+
     # ── Summary row ─────────────────────────────────────────────────────────
     st.header("✏ Review & Edit")
     c1, c2, c3, c4 = st.columns(4)
@@ -398,7 +405,7 @@ def render_tab_review() -> None:
 
 
 def _render_segment_card(seg: SubtitleSegment) -> None:
-    """Render a single segment as a collapsible expander."""
+    """Render a single segment — all labels get an editable text area."""
     label_icon = "🟢" if seg.label == "GREEN" else "🔴"
     hw_badge   = "🔧 HW-MFCC" if seg.hw_fingerprint else "💻 SW-MFCC"
     auto_badge = " 🔄 Auto-corrected from DB" if seg.corrected else ""
@@ -409,49 +416,40 @@ def _render_segment_card(seg: SubtitleSegment) -> None:
     )
 
     with st.expander(header, expanded=(seg.label == "RED")):
-        # ── Transcript text ──────────────────────────────────────────────────
-        if seg.label == "RED":
-            edit_key = f"edit_{seg.index}"
-            if edit_key not in st.session_state:
-                st.session_state[edit_key] = seg.text
+        # ── Editable transcript — ALL segments ───────────────────────────────
+        edit_key = f"edit_{seg.index}"
+        if edit_key not in st.session_state:
+            st.session_state[edit_key] = seg.text
+        edited_text = st.text_area("✏ Edit transcript", key=edit_key, height=80)
 
-            edited_text = st.text_area(
-                "✏ Edit transcript",
-                key=edit_key,
-                height=80,
-            )
-        else:
-            st.markdown(f"> {seg.text}")
-            edited_text = seg.text
-
-        # ── Footer metrics ───────────────────────────────────────────────────
+        # ── Footer metrics ────────────────────────────────────────────────────
         m1, m2, m3 = st.columns(3)
         m1.caption(f"ASR conf: **{seg.asr_conf:.3f}**")
         m2.caption(f"SNR: **{seg.snr_db:.1f} dB**")
         m3.caption(hw_badge)
 
-        # ── Correction flow (RED segments only) ──────────────────────────────
-        if seg.label == "RED":
-            col_btn, col_msg = st.columns([2, 3])
-            with col_btn:
-                validate_clicked = st.button(
-                    "💾 Validate & Save Correction",
-                    key=f"validate_{seg.index}",
-                    use_container_width=True,
-                )
-            with col_msg:
-                # Show last validation result if stored
-                vr_key = f"vr_{seg.index}"
-                if vr_key in st.session_state:
-                    vr: ValidationResult = st.session_state[vr_key]
-                    _show_validation_result(vr)
-                    # MISMATCH override button
-                    if vr.tier == "MISMATCH":
-                        if st.button("💾 Save anyway (override)", key=f"override_{seg.index}"):
-                            _do_save_correction(seg, edited_text, vr, override=True)
+        # ── Save button — ALL segments (same flow as before) ─────────────────
+        col_btn, col_msg = st.columns([2, 3])
+        with col_btn:
+            validate_clicked = st.button(
+                "💾 Validate & Save Correction",
+                key=f"validate_{seg.index}",
+                use_container_width=True,
+            )
+        with col_msg:
+            vr_key = f"vr_{seg.index}"
+            if vr_key in st.session_state:
+                vr: ValidationResult = st.session_state[vr_key]
+                _show_validation_result(vr)
+                if vr.tier == "MISMATCH":
+                    if st.button(
+                        "💾 Save anyway (override)",
+                        key=f"override_{seg.index}",
+                    ):
+                        _do_save_correction(seg, edited_text, vr, override=True)
 
-            if validate_clicked:
-                _handle_validate_correction(seg, edited_text)
+        if validate_clicked:
+            _handle_validate_correction(seg, edited_text)
 
 
 def _handle_validate_correction(seg: SubtitleSegment, new_text: str) -> None:
