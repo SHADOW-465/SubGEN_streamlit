@@ -37,7 +37,7 @@ from subgen_ai.core.transcriber import transcribe, SUPPORTED_MODELS, DEFAULT_MOD
 from subgen_ai.db.correction_store import (
     save_correction, get_db_stats, delete_correction, init_db
 )
-from subgen_ai.export.formatters import to_srt, to_vtt, to_json
+from subgen_ai.export.formatters import to_srt, to_vtt, to_json, to_burn_in
 
 from datetime import datetime
 from typing import Optional
@@ -63,6 +63,8 @@ def _init_state() -> None:
         "hw_status": "software",  # "connected" | "software" | "error"
         "correction_count": 0,    # int — corrections saved this session
         "filter_red_only": False, # bool — review tab filter
+        "video_bytes": None,   # bytes | None — raw uploaded file for the player
+        "video_ext":   "",     # str — e.g. ".mp4", ".avi"
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -94,6 +96,14 @@ def _get_audio_clip(seg: SubtitleSegment) -> Optional["np.ndarray"]:
     start_idx = max(0, int((seg.start - CLIP_PADDING_S) * sr))
     end_idx   = min(len(audio), int((seg.end + CLIP_PADDING_S) * sr))
     return audio[start_idx:end_idx]
+
+
+def _get_video_mime() -> str:
+    """Derive a MIME type from the stored video extension."""
+    import mimetypes
+    ext = st.session_state.get("video_ext", ".mp4")
+    mime, _ = mimetypes.guess_type(f"file{ext}")
+    return mime or "video/mp4"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -286,10 +296,15 @@ def _run_transcription(uploaded_file) -> None:
     """Save upload to temp file, run transcription pipeline, update session state."""
     import numpy as np
 
-    # Save upload to a temp file (ffmpeg needs a real path)
-    suffix = Path(uploaded_file.name).suffix or ".mp4"
+    # Capture raw bytes via getvalue() — works regardless of stream position.
+    # Done BEFORE the try block so bytes are saved even if transcription fails.
+    raw_bytes = uploaded_file.getvalue()
+    suffix    = Path(uploaded_file.name).suffix or ".mp4"
+    st.session_state["video_bytes"] = raw_bytes
+    st.session_state["video_ext"]   = suffix
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(uploaded_file.read())
+        tmp.write(raw_bytes)          # use raw_bytes, NOT uploaded_file.read()
         tmp_path = tmp.name
 
     progress_bar = st.progress(0, text="⏳ Starting…")
@@ -356,6 +371,13 @@ def render_tab_review() -> None:
     red_segs   = [s for s in segments if s.label == "RED"]
     green_segs = [s for s in segments if s.label == "GREEN"]
 
+    # ── Video player (top of tab, before header) ─────────────────────────────
+    vb = st.session_state.get("video_bytes")
+    if vb:
+        from subgen_ai.components.video_player import render_video_player
+        render_video_player(vb, _get_video_mime(), to_vtt(segments))
+        st.markdown("---")
+
     # ── Summary row ─────────────────────────────────────────────────────────
     st.header("✏ Review & Edit")
     c1, c2, c3, c4 = st.columns(4)
@@ -383,7 +405,7 @@ def render_tab_review() -> None:
 
 
 def _render_segment_card(seg: SubtitleSegment) -> None:
-    """Render a single segment as a collapsible expander."""
+    """Render a single segment — all labels get an editable text area."""
     label_icon = "🟢" if seg.label == "GREEN" else "🔴"
     hw_badge   = "🔧 HW-MFCC" if seg.hw_fingerprint else "💻 SW-MFCC"
     auto_badge = " 🔄 Auto-corrected from DB" if seg.corrected else ""
@@ -394,49 +416,40 @@ def _render_segment_card(seg: SubtitleSegment) -> None:
     )
 
     with st.expander(header, expanded=(seg.label == "RED")):
-        # ── Transcript text ──────────────────────────────────────────────────
-        if seg.label == "RED":
-            edit_key = f"edit_{seg.index}"
-            if edit_key not in st.session_state:
-                st.session_state[edit_key] = seg.text
+        # ── Editable transcript — ALL segments ───────────────────────────────
+        edit_key = f"edit_{seg.index}"
+        if edit_key not in st.session_state:
+            st.session_state[edit_key] = seg.text
+        edited_text = st.text_area("✏ Edit transcript", key=edit_key, height=80)
 
-            edited_text = st.text_area(
-                "✏ Edit transcript",
-                key=edit_key,
-                height=80,
-            )
-        else:
-            st.markdown(f"> {seg.text}")
-            edited_text = seg.text
-
-        # ── Footer metrics ───────────────────────────────────────────────────
+        # ── Footer metrics ────────────────────────────────────────────────────
         m1, m2, m3 = st.columns(3)
         m1.caption(f"ASR conf: **{seg.asr_conf:.3f}**")
         m2.caption(f"SNR: **{seg.snr_db:.1f} dB**")
         m3.caption(hw_badge)
 
-        # ── Correction flow (RED segments only) ──────────────────────────────
-        if seg.label == "RED":
-            col_btn, col_msg = st.columns([2, 3])
-            with col_btn:
-                validate_clicked = st.button(
-                    "💾 Validate & Save Correction",
-                    key=f"validate_{seg.index}",
-                    use_container_width=True,
-                )
-            with col_msg:
-                # Show last validation result if stored
-                vr_key = f"vr_{seg.index}"
-                if vr_key in st.session_state:
-                    vr: ValidationResult = st.session_state[vr_key]
-                    _show_validation_result(vr)
-                    # MISMATCH override button
-                    if vr.tier == "MISMATCH":
-                        if st.button("💾 Save anyway (override)", key=f"override_{seg.index}"):
-                            _do_save_correction(seg, edited_text, vr, override=True)
+        # ── Save button — ALL segments (same flow as before) ─────────────────
+        col_btn, col_msg = st.columns([2, 3])
+        with col_btn:
+            validate_clicked = st.button(
+                "💾 Validate & Save Correction",
+                key=f"validate_{seg.index}",
+                use_container_width=True,
+            )
+        with col_msg:
+            vr_key = f"vr_{seg.index}"
+            if vr_key in st.session_state:
+                vr: ValidationResult = st.session_state[vr_key]
+                _show_validation_result(vr)
+                if vr.tier == "MISMATCH":
+                    if st.button(
+                        "💾 Save anyway (override)",
+                        key=f"override_{seg.index}",
+                    ):
+                        _do_save_correction(seg, edited_text, vr, override=True)
 
-            if validate_clicked:
-                _handle_validate_correction(seg, edited_text)
+        if validate_clicked:
+            _handle_validate_correction(seg, edited_text)
 
 
 def _handle_validate_correction(seg: SubtitleSegment, new_text: str) -> None:
@@ -547,9 +560,30 @@ def render_tab_export() -> None:
     vtt_str  = to_vtt(segments)
     json_str = to_json(segments)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+        video_bytes = st.session_state.get("video_bytes")
+        video_ext   = st.session_state.get("video_ext", "")
+        is_video    = video_ext in (".mp4", ".avi", ".mov", ".mkv")
+        if not video_bytes or not is_video:
+            st.info("🔥 Burn-in requires a video file (not audio-only).")
+        else:
+            if st.button("🔥 Generate Burn-in .mp4", use_container_width=True):
+                try:
+                    with st.spinner("🔥 Encoding burn-in subtitles…"):
+                        burned = to_burn_in(video_bytes, segments, ext=video_ext)
+                    st.download_button(
+                        label="⬇ Download burned-in .mp4",
+                        data=burned,
+                        file_name=f"{base_name}_burned.mp4",
+                        mime="video/mp4",
+                        use_container_width=True,
+                    )
+                except RuntimeError as exc:
+                    st.error(f"❌ Burn-in failed: {exc}")
+
+    with col2:
         st.download_button(
             label="⬇ Download .srt",
             data=srt_str.encode("utf-8"),
@@ -558,7 +592,7 @@ def render_tab_export() -> None:
             use_container_width=True,
         )
 
-    with col2:
+    with col3:
         st.download_button(
             label="⬇ Download .vtt",
             data=vtt_str.encode("utf-8"),
@@ -567,7 +601,7 @@ def render_tab_export() -> None:
             use_container_width=True,
         )
 
-    with col3:
+    with col4:
         st.download_button(
             label="⬇ Download .json (with QC metadata)",
             data=json_str.encode("utf-8"),

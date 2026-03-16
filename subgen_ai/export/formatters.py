@@ -7,6 +7,8 @@ Converts a list of SubtitleSegment into:
   - JSON (with QC metadata)
 """
 import json
+import os
+import tempfile
 from typing import List
 
 from subgen_ai.core.models import SubtitleSegment
@@ -85,3 +87,74 @@ def to_json(segments: List[SubtitleSegment]) -> str:
             "corrected": seg.corrected,
         })
     return json.dumps({"segments": data}, ensure_ascii=False, indent=2)
+
+
+def to_burn_in(
+    video_bytes: bytes,
+    segments: List[SubtitleSegment],
+    ext: str = ".mp4",
+) -> bytes:
+    """
+    Re-encode video with subtitles permanently baked into the pixels.
+
+    Uses ffmpeg's ``subtitles`` video filter. Audio is copied without
+    re-encoding (``acodec=copy``) for speed.
+
+    Args:
+        video_bytes: Raw bytes of the source video file.
+        segments:    List of SubtitleSegment (text is used as-is).
+        ext:         File extension of the source video (e.g. ".mp4", ".avi").
+                     Used so ffmpeg can probe the correct container format.
+
+    Returns:
+        Raw bytes of the burned-in MP4.
+
+    Raises:
+        RuntimeError: If ffmpeg exits with an error.
+    """
+    import ffmpeg  # local import — only needed when this function runs
+
+    srt_path = vid_path = out_path = None
+    try:
+        # 1. Write SRT subtitles to a temp file
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".srt", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(to_srt(segments))
+            srt_path = f.name
+
+        # 2. Write the source video bytes to a temp file with correct extension
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+            f.write(video_bytes)
+            vid_path = f.name
+
+        # 3. Prepare output path
+        out_fd, out_path = tempfile.mkstemp(suffix=".mp4")
+        os.close(out_fd)
+
+        # 4. Run ffmpeg: burn subtitles, copy audio track
+        try:
+            (
+                ffmpeg
+                .input(vid_path)
+                .output(out_path, vf=f"subtitles='{srt_path}'", acodec="copy")
+                .overwrite_output()
+                .run(quiet=True)
+            )
+        except ffmpeg.Error as e:
+            raise RuntimeError(
+                f"ffmpeg failed: {e.stderr.decode(errors='replace')}"
+            )
+
+        # 5. Return the output bytes
+        with open(out_path, "rb") as f:
+            return f.read()
+
+    finally:
+        # 6. Always clean up temp files
+        for p in (srt_path, vid_path, out_path):
+            if p:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
