@@ -560,9 +560,30 @@ def render_tab_export() -> None:
     vtt_str  = to_vtt(segments)
     json_str = to_json(segments)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+        video_bytes = st.session_state.get("video_bytes")
+        video_ext   = st.session_state.get("video_ext", "")
+        is_video    = video_ext in (".mp4", ".avi", ".mov", ".mkv")
+        if not video_bytes or not is_video:
+            st.info("🔥 Burn-in requires a video file (not audio-only).")
+        else:
+            if st.button("🔥 Generate Burn-in .mp4", use_container_width=True):
+                try:
+                    with st.spinner("🔥 Encoding burn-in subtitles…"):
+                        burned = to_burn_in(video_bytes, segments, ext=video_ext)
+                    st.download_button(
+                        label="⬇ Download burned-in .mp4",
+                        data=burned,
+                        file_name=f"{base_name}_burned.mp4",
+                        mime="video/mp4",
+                        use_container_width=True,
+                    )
+                except RuntimeError as exc:
+                    st.error(f"❌ Burn-in failed: {exc}")
+
+    with col2:
         st.download_button(
             label="⬇ Download .srt",
             data=srt_str.encode("utf-8"),
@@ -571,7 +592,7 @@ def render_tab_export() -> None:
             use_container_width=True,
         )
 
-    with col2:
+    with col3:
         st.download_button(
             label="⬇ Download .vtt",
             data=vtt_str.encode("utf-8"),
@@ -580,7 +601,7 @@ def render_tab_export() -> None:
             use_container_width=True,
         )
 
-    with col3:
+    with col4:
         st.download_button(
             label="⬇ Download .json (with QC metadata)",
             data=json_str.encode("utf-8"),
