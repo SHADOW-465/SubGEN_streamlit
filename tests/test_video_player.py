@@ -52,3 +52,29 @@ def test_large_file_warns_and_skips(monkeypatch):
     render_video_player(big, "video/mp4", FAKE_VTT)
     assert warns, "Expected a st.warning for oversized file"
     assert not html_calls, "Expected no HTML injection for oversized file"
+
+
+def test_invalid_mime_shows_error_and_skips(monkeypatch):
+    errors = []
+    html_calls = []
+    monkeypatch.setattr("streamlit.error", lambda m: errors.append(m))
+    monkeypatch.setattr("streamlit.components.v1.html", lambda h, **kw: html_calls.append(h))
+    render_video_player(b"FAKEVIDEO", 'video/mp4" onerror="alert(1)', FAKE_VTT)
+    assert errors, "Expected st.error for invalid MIME"
+    assert not html_calls, "Expected no HTML for invalid MIME"
+
+
+def test_track_has_label_attribute(monkeypatch):
+    calls = _capture_html(monkeypatch)
+    render_video_player(b"FAKEVIDEO", "video/mp4", FAKE_VTT)
+    assert 'label="Subtitles"' in calls[0]
+
+
+def test_empty_video_bytes_warns_and_skips(monkeypatch):
+    warns = []
+    html_calls = []
+    monkeypatch.setattr("streamlit.warning", lambda m: warns.append(m))
+    monkeypatch.setattr("streamlit.components.v1.html", lambda h, **kw: html_calls.append(h))
+    render_video_player(b"", "video/mp4", FAKE_VTT)
+    assert warns
+    assert not html_calls
