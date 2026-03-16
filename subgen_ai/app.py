@@ -37,7 +37,7 @@ from subgen_ai.core.transcriber import transcribe, SUPPORTED_MODELS, DEFAULT_MOD
 from subgen_ai.db.correction_store import (
     save_correction, get_db_stats, delete_correction, init_db
 )
-from subgen_ai.export.formatters import to_srt, to_vtt, to_json
+from subgen_ai.export.formatters import to_srt, to_vtt, to_json, to_burn_in
 
 from datetime import datetime
 from typing import Optional
@@ -63,6 +63,8 @@ def _init_state() -> None:
         "hw_status": "software",  # "connected" | "software" | "error"
         "correction_count": 0,    # int — corrections saved this session
         "filter_red_only": False, # bool — review tab filter
+        "video_bytes": None,   # bytes | None — raw uploaded file for the player
+        "video_ext":   "",     # str — e.g. ".mp4", ".avi"
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -94,6 +96,14 @@ def _get_audio_clip(seg: SubtitleSegment) -> Optional["np.ndarray"]:
     start_idx = max(0, int((seg.start - CLIP_PADDING_S) * sr))
     end_idx   = min(len(audio), int((seg.end + CLIP_PADDING_S) * sr))
     return audio[start_idx:end_idx]
+
+
+def _get_video_mime() -> str:
+    """Derive a MIME type from the stored video extension."""
+    import mimetypes
+    ext = st.session_state.get("video_ext", ".mp4")
+    mime, _ = mimetypes.guess_type(f"file{ext}")
+    return mime or "video/mp4"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -286,10 +296,15 @@ def _run_transcription(uploaded_file) -> None:
     """Save upload to temp file, run transcription pipeline, update session state."""
     import numpy as np
 
-    # Save upload to a temp file (ffmpeg needs a real path)
-    suffix = Path(uploaded_file.name).suffix or ".mp4"
+    # Capture raw bytes via getvalue() — works regardless of stream position.
+    # Done BEFORE the try block so bytes are saved even if transcription fails.
+    raw_bytes = uploaded_file.getvalue()
+    suffix    = Path(uploaded_file.name).suffix or ".mp4"
+    st.session_state["video_bytes"] = raw_bytes
+    st.session_state["video_ext"]   = suffix
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(uploaded_file.read())
+        tmp.write(raw_bytes)          # use raw_bytes, NOT uploaded_file.read()
         tmp_path = tmp.name
 
     progress_bar = st.progress(0, text="⏳ Starting…")
